@@ -20,6 +20,9 @@ library(sf)
 library(tigris)
 library(leaflet.extras)
 library(readr)
+library(esquisse)
+
+# esquisse::esquisser()
 
 housing_data <- read.csv("Housing_2020.csv")
 housing_data[housing_data==""] <- NA
@@ -50,7 +53,7 @@ housing_medp4 <- datatable(housing_medp3, options = list(
 
 #Tab 3 Preparation: 
 housing_box <- subset(housing_data, select = c("BEDS", "BATHS", "SQUARE.FEET", 
-                                               "LOT.SIZE", "PRICE", "YEAR.BUILT"))
+                                               "LOT.SIZE", "PRICE", "YEAR.BUILT", "CITY"))
 
 #housing_box$YEAR.BUILT <- as.Date(as.character(housing_box$YEAR.BUILT), format = "%Y")
 #housing_box$YEAR.BUILT <- year(housing_box$YEAR.BUILT)
@@ -58,6 +61,11 @@ housing_box <- subset(housing_data, select = c("BEDS", "BATHS", "SQUARE.FEET",
 #housing_box$YEAR.BUILT<-format(housing_box$YEAR.BUILT, format="%Y")
 
 housing_box2 <- tibble::rowid_to_column(housing_box, "ID")
+
+housing_box2$YEAR.BUILT <- as.numeric(housing_box2$YEAR.BUILT)
+
+yearlist <- unique(housing_box2$YEAR.BUILT)
+yearlist <- sort(yearlist)
 
 #Tab 4 Preparation: 
 housing_map <- subset(housing_data, select = c("PROPERTY.TYPE", "BEDS", "BATHS", 
@@ -69,6 +77,9 @@ housing_map$YEAR.BUILT <- year(housing_map$YEAR.BUILT)
 
 housing_map$YEAR.BUILT<-format(housing_map$YEAR.BUILT, format="%Y")
 
+citylist <- unique(housing_map$CITY)
+citylist <- sort(citylist)
+
 #Define UI
 
 ui <- fluidPage(
@@ -77,7 +88,7 @@ ui <- fluidPage(
     
     tabsetPanel(
         #Tab 1:
-        tabPanel("Histogram", fluid = TRUE,
+        tabPanel("Distribution of Price by Zip Code", fluid = TRUE,
                  sidebarLayout(
                      
                      # Sidebar panel for Inputs ----
@@ -104,7 +115,7 @@ ui <- fluidPage(
                  )
         ), 
         #Tab 2:
-        tabPanel("Median Home Price by Zip Code and Property Type", fluid = TRUE,
+        tabPanel("Median Price by Zip Code and Property Type", fluid = TRUE,
                  fluidRow(
                      column(12,
                             dataTableOutput('table')
@@ -112,24 +123,63 @@ ui <- fluidPage(
                  )
         ),
         #Tab 3: 
-        tabPanel("Box Plot", fluid = TRUE,
+        tabPanel("Price Comparison by City", fluid = TRUE,
                  sidebarLayout(
                      
                      # Sidebar panel for Inputs ----
                      sidebarPanel(
                          
-                         # Input: Select variable for y-axis ----
-                         sliderInput(inputId = "beds",
+                         # # Input: Select variable for y-axis ----
+                         # sliderInput(inputId = "beds",
+                         #             
+                         #             HTML("Select Number of Beds: <br/> 
+                         #              Note: If an error message appears, the number of beds selected is not available. Please select a different number"),
+                         #             
+                         #             min = 0,
+                         #             
+                         #             max = 16, 
+                         #             
+                         #             value = 0, 
+                         # ), 
+                         # # BATHS
+                         # sliderInput(inputId = "baths",
+                         #             
+                         #             HTML("Select Number of Baths: <br/> 
+                         #              Note: If an error message appears, the number of baths selected is not available. Please select a different number."),
+                         #             
+                         #             min = 0,
+                         #             
+                         #             max = 10, 
+                         #             
+                         #             value = 0, 
+                         #             
+                         # ), 
+                         
+                         pickerInput(inputId = "City2",
                                      
-                                     HTML("Select Number of Beds: <br/> 
-                                      Note: If an error message appears, the number of beds selected is not available. Please select a different number"),
+                                     HTML("Select a City or Cities: "),
                                      
-                                     min = 0,
+                                     choices = citylist, 
                                      
-                                     max = 16, 
+                                     options = list(`actions-box` = TRUE), multiple = T, 
                                      
-                                     value = 0, 
-                         )
+                         ),
+                         
+                         # sliderInput(inputId = "Year",
+                         # 
+                         #       HTML("Select Year: <br/>
+                         #       Note: If an error message appears, the Year selected is not available. Please select a different year."),
+                         # 
+                         #       min = 1868,
+                         # 
+                         #       max = 2021,
+                         # 
+                         #       value = 1868,
+                         #       
+                         #       sep = "", 
+                         # 
+                         #             ),
+                         
                      ),
                      
                      
@@ -142,10 +192,29 @@ ui <- fluidPage(
         ),
         
         #Tab 4: 
-        tabPanel("Dallas Area House Map", fluid = TRUE,
+        tabPanel("Dallas Area Map", fluid = TRUE,
+                 sidebarLayout(
+                     
+                     # Sidebar panel for Inputs ----
+                     sidebarPanel(
+                         
+                         # Input: Select variable for y-axis ----
+                         pickerInput(inputId = "City",
+                                     
+                                     HTML("Select a City or Cities: "),
+                                     
+                                     choices = citylist, 
+                                     
+                                     options = list(`actions-box` = TRUE), multiple = T, 
+                                     selected = "Dallas"
+                         ),
+                     ),
+                 
+                 
                  mainPanel(
                      leafletOutput(outputId = "map"), 
                  )
+             )
         )
         
     )
@@ -167,7 +236,7 @@ server <- function(input, output) {
         
         hist(histFilter,
              xlab = "Distribution of House Prices",
-             main = "Histogram of Distribution of House Prices",
+             main = "Distribution of House Prices by Zip Code",
              col = "yellow")
     })
     
@@ -179,22 +248,53 @@ server <- function(input, output) {
     #Create Boxplot 
     output$newboxplot <- renderPlot({
         
-        boxFilter <- subset(housing_box2$PRICE, housing_box2$BEDS == input$beds)
+        # boxFilter <- subset(housing_box2$PRICE, housing_box2$BEDS == input$beds,
+        #                     housing_box2$BATHS == input$baths,
+        #                     housing_box2$YEAR.BUILT == input$year
+        #                     #housing_box2$YEAR.BUILT == input$beds,
+        #                     #housing_box2$SQUARE.FEET == input$beds,
+        #                     )
+       
+        # boxplot(log(PRICE) ~ (YEAR.BUILT==input$year), 
+        #         housing_box2, xlab="Beds", ylab="Median House Price", 
+        #         main="Box Plot of Median House Price Based on Number of Beds")
+        # 
+        # housing_box2 %>%
+        #     req(YEAR.BUILT == input$year) %>%
+        #     ggplot(housing_box2) +
+        #     aes(x = YEAR.BUILT, y = PRICE) +
+        #     geom_boxplot(fill = "#0c4c8a") +
+        #     theme_minimal()
         
-        boxplot(boxFilter, xlab="Beds", ylab="Median House Price", 
-                main="Box Plot of Median House Price Based on Number of Beds")
+        validate(
+            need(input$City2 != "", "Please select a city.")
+        )
+
+        housing_box2 %>%
+            filter(CITY == input$City2) %>%
+            ggplot() +
+            aes(x = CITY, y = log(PRICE)) +
+            geom_boxplot(fill = "#9ecae1") +
+            labs(y = "Price") + 
+            theme_minimal() + 
+            theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
     })
     
     #Create Map
     output$map <- renderLeaflet ({
+        
+        validate(
+            need(input$City != "", "Please select a city.")
+        )
+        
         leaflet(housing_map) %>% 
             setView(lng = -96.8351, lat = 32.8025, zoom =9) %>%
             addTiles() %>%
-            addCircles(data = housing_map, lat = ~ LATITUDE, lng = ~ LONGITUDE, 
-                       weight = 1, 
-                       label = ~as.character(paste0("Price: ", PRICE, "," , 
-                                                    " Year: ", YEAR.BUILT, "," 
-                                                    , " Beds: ", BEDS))
+            addAwesomeMarkers(data = housing_map %>% filter(CITY == input$City), 
+                              lat = ~ LATITUDE, lng = ~ LONGITUDE, 
+                              popup = ~as.character(paste("Price: ", PRICE, "<br>",
+                                                          "Year: ", YEAR.BUILT, "<br>", 
+                                                          "Beds: ", BEDS))
             )
         
     })
